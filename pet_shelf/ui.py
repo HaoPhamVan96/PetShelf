@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import math
+import random
 import shutil
 import subprocess
 import sys
@@ -9,7 +10,17 @@ from pathlib import Path
 
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QCursor, QMouseEvent, QPixmap
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QCloseEvent,
+    QCursor,
+    QFont,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -27,6 +38,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSizePolicy,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -38,6 +50,19 @@ from .petdex import PetDexDialog
 
 def pixmap_from_pil(image) -> QPixmap:
     return QPixmap.fromImage(ImageQt(image))
+
+
+def tray_icon_pixmap(size: int = 64) -> QIcon:
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    font = QFont()
+    font.setPointSize(round(size * 0.62))
+    painter.setFont(font)
+    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "\U0001F43E")
+    painter.end()
+    return QIcon(pixmap)
 
 
 def drag_animation_for_delta(delta_x: int) -> str | None:
@@ -61,6 +86,9 @@ class PetOverlay(QWidget):
     hidden_by_user = Signal(str)
     BASE_WIDTH = 192
     BASE_HEIGHT = 208
+    CYCLE_EXCLUDED_STATES = {"idle", "running-left", "running-right"}
+    CYCLE_MIN_DELAY_MS = 6000
+    CYCLE_MAX_DELAY_MS = 15000
 
     def __init__(self) -> None:
         super().__init__()
@@ -100,6 +128,7 @@ class PetOverlay(QWidget):
         self.look_direction: int | None = None
         self.border_enabled = False
         self.border_color = "#202124"
+        self.cycle_enabled = False
         self.outline_cache: dict[tuple[str, int, int | None, str], object] = {}
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
@@ -107,6 +136,12 @@ class PetOverlay(QWidget):
         self.look_timer = QTimer(self)
         self.look_timer.setInterval(50)
         self.look_timer.timeout.connect(self._update_pointer_look)
+        self.cycle_timer = QTimer(self)
+        self.cycle_timer.setSingleShot(True)
+        self.cycle_timer.timeout.connect(self._cycle_tick)
+        self.cycle_end_timer = QTimer(self)
+        self.cycle_end_timer.setSingleShot(True)
+        self.cycle_end_timer.timeout.connect(self._end_cycle_animation)
 
     def set_pet(self, pet: Pet) -> None:
         self.pet = pet
@@ -180,10 +215,14 @@ class PetOverlay(QWidget):
         self.raise_()
         self._render_frame()
         self.look_timer.start()
+        if self.cycle_enabled:
+            self._schedule_cycle()
 
     def hide_pet(self) -> None:
         self.timer.stop()
         self.look_timer.stop()
+        self.cycle_timer.stop()
+        self.cycle_end_timer.stop()
         self.hide()
         if self.pet:
             self.hidden_by_user.emit(self.pet.pet_id)
@@ -212,7 +251,7 @@ class PetOverlay(QWidget):
                 names.extend(self.pet.custom_animations)
             for state in names:
                 action = QAction(state.replace("-", " ").title(), menu)
-                action.triggered.connect(lambda checked=False, name=state: self.play_state(name))
+                action.triggered.connect(lambda checked=False, name=state: self._play_manual_state(name))
                 menu.addAction(action)
             menu.addSeparator()
             menu.addAction("Hide Pet", self.hide_pet)
@@ -259,6 +298,10 @@ class PetOverlay(QWidget):
         self.look_direction = None
         self._render_frame()
 
+    def _play_manual_state(self, state: str) -> None:
+        self.active_interaction = None
+        self.play_state(state)
+
     def set_animation_speed(self, speed: float) -> None:
         self.animation_speed = min(5.0, max(0.1, float(speed)))
         if self.pet and self.isVisible():
@@ -295,6 +338,50 @@ class PetOverlay(QWidget):
         self.outline_cache.clear()
         if self.pet:
             self._render_frame()
+
+    def set_cycle_mode(self, enabled: bool) -> None:
+        self.cycle_enabled = enabled
+        if enabled:
+            if self.isVisible():
+                self._schedule_cycle()
+        else:
+            self.cycle_timer.stop()
+            self.cycle_end_timer.stop()
+            if self.active_interaction == "cycle":
+                self.active_interaction = None
+                self.play_state("idle")
+
+    def _schedule_cycle(self) -> None:
+        if not self.cycle_enabled:
+            return
+        delay = random.randint(self.CYCLE_MIN_DELAY_MS, self.CYCLE_MAX_DELAY_MS)
+        self.cycle_timer.start(max(500, round(delay / self.animation_speed)))
+
+    def _cycle_tick(self) -> None:
+        if not self.cycle_enabled or not self.pet:
+            return
+        if self.state != "idle" or self.active_interaction is not None or self.drag_offset is not None:
+            self._schedule_cycle()
+            return
+        names = [name for name in ANIMATIONS if name not in self.CYCLE_EXCLUDED_STATES]
+        names.extend(
+            name for name in self.pet.custom_animations if name not in self.CYCLE_EXCLUDED_STATES
+        )
+        if not names:
+            self._schedule_cycle()
+            return
+        choice = random.choice(names)
+        self.active_interaction = "cycle"
+        self.play_state(choice)
+        spec = self.pet.animation_spec(choice)
+        duration_ms = sum(spec.durations_ms) if spec else 1000
+        self.cycle_end_timer.start(max(200, round(duration_ms / self.animation_speed)))
+
+    def _end_cycle_animation(self) -> None:
+        if self.active_interaction == "cycle":
+            self.active_interaction = None
+            self.play_state("idle")
+        self._schedule_cycle()
 
     def _update_pointer_look(self) -> None:
         if (
@@ -407,6 +494,7 @@ class SettingsDialog(QDialog):
     size_changed = Signal(int)
     border_changed = Signal(bool, str)
     follow_changed = Signal(bool)
+    cycle_changed = Signal(bool)
 
     def __init__(
         self,
@@ -415,6 +503,7 @@ class SettingsDialog(QDialog):
         border_enabled: bool,
         border_color: str,
         follow_pointer: bool,
+        cycle_mode: bool,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -466,6 +555,11 @@ class SettingsDialog(QDialog):
         self.follow_check.setChecked(follow_pointer)
         self.follow_check.toggled.connect(self.follow_changed.emit)
         layout.addWidget(self.follow_check)
+
+        self.cycle_check = QCheckBox("Cycle animations automatically")
+        self.cycle_check.setChecked(cycle_mode)
+        self.cycle_check.toggled.connect(self.cycle_changed.emit)
+        layout.addWidget(self.cycle_check)
 
         border_row = QHBoxLayout()
         self.border_check = QCheckBox("Pet outline (1px)")
@@ -539,6 +633,7 @@ class MainWindow(QMainWindow):
         self.border_enabled = self.settings.value("borderEnabled", False, type=bool)
         self.border_color = str(self.settings.value("borderColor", "#202124"))
         self.follow_pointer = self.settings.value("followPointer", True, type=bool)
+        self.cycle_mode = self.settings.value("cycleMode", False, type=bool)
         self.settings_dialog: SettingsDialog | None = None
 
         central = QWidget()
@@ -588,6 +683,50 @@ class MainWindow(QMainWindow):
             self.refresh()
         else:
             self._render_empty("No pet folder selected yet. Open the gate, senpai ✨")
+
+        self._tray_hint_shown = False
+        self.tray_available = QSystemTrayIcon.isSystemTrayAvailable()
+        self.tray_icon: QSystemTrayIcon | None = None
+        if self.tray_available:
+            self._setup_tray_icon()
+
+    def _setup_tray_icon(self) -> None:
+        icon = tray_icon_pixmap()
+        self.setWindowIcon(icon)
+        tray = QSystemTrayIcon(icon, self)
+        tray.setToolTip("Pet Shelf")
+        menu = QMenu()
+        show_action = QAction("Show Pet Shelf", self)
+        show_action.triggered.connect(self._restore_from_tray)
+        quit_action = QAction("Quit Pet Shelf", self)
+        quit_action.triggered.connect(self._quit_app)
+        menu.addAction(show_action)
+        menu.addSeparator()
+        menu.addAction(quit_action)
+        tray.setContextMenu(menu)
+        tray.activated.connect(self._tray_activated)
+        tray.show()
+        self.tray_icon = tray
+
+    def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            self._restore_from_tray()
+
+    def _restore_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_app(self) -> None:
+        if self.tray_icon:
+            self.tray_icon.hide()
+        for overlay in list(self.overlays.values()):
+            overlay.blockSignals(True)
+            overlay.close()
+        QApplication.instance().quit()
 
     def choose_root(self) -> None:
         start = str(self.root) if self.root else str(Path.home())
@@ -659,12 +798,14 @@ class MainWindow(QMainWindow):
                 self.border_enabled,
                 self.border_color,
                 self.follow_pointer,
+                self.cycle_mode,
                 self,
             )
             dialog.speed_changed.connect(self.change_animation_speed)
             dialog.size_changed.connect(self.change_pet_size)
             dialog.border_changed.connect(self.apply_border)
             dialog.follow_changed.connect(self.toggle_follow_pointer)
+            dialog.cycle_changed.connect(self.toggle_cycle_mode)
             dialog.finished.connect(lambda: setattr(self, "settings_dialog", None))
             self.settings_dialog = dialog
         self.settings_dialog.show()
@@ -684,6 +825,12 @@ class MainWindow(QMainWindow):
         self.settings.setValue("followPointer", enabled)
         for overlay in self.overlays.values():
             overlay.set_follow_pointer(enabled)
+
+    def toggle_cycle_mode(self, enabled: bool) -> None:
+        self.cycle_mode = enabled
+        self.settings.setValue("cycleMode", enabled)
+        for overlay in self.overlays.values():
+            overlay.set_cycle_mode(enabled)
 
     def refresh(self) -> None:
         if not self.root:
@@ -749,6 +896,7 @@ class MainWindow(QMainWindow):
         overlay.set_display_scale(self.pet_scale)
         overlay.set_border(self.border_enabled, self.border_color)
         overlay.set_follow_pointer(self.follow_pointer)
+        overlay.set_cycle_mode(self.cycle_mode)
         overlay.set_pet(pet)
         overlay.hidden_by_user.connect(self._overlay_hidden)
         slot = len(self.overlays)
@@ -805,10 +953,22 @@ class MainWindow(QMainWindow):
             overlay.keep_visible()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        for overlay in list(self.overlays.values()):
-            overlay.blockSignals(True)
-            overlay.close()
-        super().closeEvent(event)
+        if not self.tray_available:
+            for overlay in list(self.overlays.values()):
+                overlay.blockSignals(True)
+                overlay.close()
+            super().closeEvent(event)
+            return
+        event.ignore()
+        self.hide()
+        if not self._tray_hint_shown and self.tray_icon:
+            self.tray_icon.showMessage(
+                "Pet Shelf",
+                "Pet Shelf vẫn chạy dưới khay hệ thống. Bấm vào icon để mở lại giao diện.",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000,
+            )
+            self._tray_hint_shown = True
 
 
 STYLE = """
