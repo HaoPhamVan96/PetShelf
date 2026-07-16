@@ -4,5 +4,11 @@ $Python = Join-Path $PWD ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) {
     $Python = "python"
 }
-& $Python -m PyInstaller --noconfirm --clean --windowed --name PetShelf --icon assets\petshelf.ico --add-data "assets;assets" --collect-all PIL run_pet_shelf.py
+& $Python -m PyInstaller --noconfirm --clean --windowed --name PetShelf --paths . --icon assets\petshelf.ico --add-data "assets;assets" --collect-all PIL `
+    --hidden-import pet_shelf.app `
+    --hidden-import pet_shelf.ui `
+    --hidden-import pet_shelf.models `
+    --hidden-import pet_shelf.editor `
+    --hidden-import pet_shelf.petdex `
+    run_pet_shelf.py
 Write-Host "Built: dist/PetShelf/PetShelf.exe"
