@@ -10,7 +10,17 @@ from pathlib import Path
 
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QCursor, QMouseEvent, QPixmap
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QCloseEvent,
+    QCursor,
+    QFont,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -28,6 +38,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSizePolicy,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -39,6 +50,19 @@ from .petdex import PetDexDialog
 
 def pixmap_from_pil(image) -> QPixmap:
     return QPixmap.fromImage(ImageQt(image))
+
+
+def tray_icon_pixmap(size: int = 64) -> QIcon:
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    font = QFont()
+    font.setPointSize(round(size * 0.62))
+    painter.setFont(font)
+    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "\U0001F43E")
+    painter.end()
+    return QIcon(pixmap)
 
 
 def drag_animation_for_delta(delta_x: int) -> str | None:
@@ -660,6 +684,50 @@ class MainWindow(QMainWindow):
         else:
             self._render_empty("No pet folder selected yet. Open the gate, senpai ✨")
 
+        self._tray_hint_shown = False
+        self.tray_available = QSystemTrayIcon.isSystemTrayAvailable()
+        self.tray_icon: QSystemTrayIcon | None = None
+        if self.tray_available:
+            self._setup_tray_icon()
+
+    def _setup_tray_icon(self) -> None:
+        icon = tray_icon_pixmap()
+        self.setWindowIcon(icon)
+        tray = QSystemTrayIcon(icon, self)
+        tray.setToolTip("Pet Shelf")
+        menu = QMenu()
+        show_action = QAction("Show Pet Shelf", self)
+        show_action.triggered.connect(self._restore_from_tray)
+        quit_action = QAction("Quit Pet Shelf", self)
+        quit_action.triggered.connect(self._quit_app)
+        menu.addAction(show_action)
+        menu.addSeparator()
+        menu.addAction(quit_action)
+        tray.setContextMenu(menu)
+        tray.activated.connect(self._tray_activated)
+        tray.show()
+        self.tray_icon = tray
+
+    def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            self._restore_from_tray()
+
+    def _restore_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_app(self) -> None:
+        if self.tray_icon:
+            self.tray_icon.hide()
+        for overlay in list(self.overlays.values()):
+            overlay.blockSignals(True)
+            overlay.close()
+        QApplication.instance().quit()
+
     def choose_root(self) -> None:
         start = str(self.root) if self.root else str(Path.home())
         chosen = QFileDialog.getExistingDirectory(self, "Choose parent pet folder", start)
@@ -885,10 +953,22 @@ class MainWindow(QMainWindow):
             overlay.keep_visible()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        for overlay in list(self.overlays.values()):
-            overlay.blockSignals(True)
-            overlay.close()
-        super().closeEvent(event)
+        if not self.tray_available:
+            for overlay in list(self.overlays.values()):
+                overlay.blockSignals(True)
+                overlay.close()
+            super().closeEvent(event)
+            return
+        event.ignore()
+        self.hide()
+        if not self._tray_hint_shown and self.tray_icon:
+            self.tray_icon.showMessage(
+                "Pet Shelf",
+                "Pet Shelf vẫn chạy dưới khay hệ thống. Bấm vào icon để mở lại giao diện.",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000,
+            )
+            self._tray_hint_shown = True
 
 
 STYLE = """

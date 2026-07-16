@@ -17,6 +17,7 @@ def main() -> int:
     QCoreApplication.setOrganizationName("PetShelf")
     QCoreApplication.setApplicationName("PetShelf")
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE)
     window = MainWindow()
