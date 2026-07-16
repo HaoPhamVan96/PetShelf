@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pet-shelf"
+version = "1.0.0"
+description = "Cross-platform desktop manager and renderer for Codex-compatible pets"
+requires-python = ">=3.10"
+dependencies = ["Pillow>=10.2,<13", "PySide6-Essentials>=6.7,<7"]
+
+[project.scripts]
+pet-shelf = "pet_shelf.app:main"
+
+[tool.setuptools.packages.find]
+include = ["pet_shelf*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
