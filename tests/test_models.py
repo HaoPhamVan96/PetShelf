@@ -107,6 +107,48 @@ def test_custom_interactions_are_parsed(tmp_path):
     assert pet.interactions["click"].animations == ("special", "waving")
 
 
+def test_custom_animation_can_use_extra_row_index(tmp_path):
+    folder = make_pet(tmp_path, version=1, size=(1536, 13 * 192))
+    atlas = Image.open(folder / "spritesheet.webp").convert("RGBA")
+    for y in range(10 * 192, 11 * 192):
+        for x in range(2 * 192, 3 * 192):
+            atlas.putpixel((x, y), (20, 120, 240, 255))
+    atlas.save(folder / "spritesheet.webp", lossless=True)
+    data = json.loads((folder / "pet.json").read_text())
+    data["animations"] = {
+        "extra-form": {
+            "sourceRowIndex": 10,
+            "frameCount": 4,
+            "timingMs": [100, 100, 100, 100],
+            "playback": "once",
+        }
+    }
+    data["interactions"] = {"click": {"animations": ["extra-form"], "mode": "cycle"}}
+    (folder / "pet.json").write_text(json.dumps(data), encoding="utf-8")
+
+    pet = load_pet(folder)
+
+    assert pet.atlas_rows == 13
+    assert pet.animation_spec("extra-form").row == 10
+    assert pet.frame("extra-form", 2).getpixel((96, 96)) == (20, 120, 240, 255)
+    assert pet.interactions["click"].animations == ("extra-form",)
+
+
+def test_hover_and_drag_behavior_can_be_disabled(tmp_path):
+    folder = make_pet(
+        tmp_path,
+        extra={
+            "hoverBehavior": {"mode": "disabled"},
+            "dragBehavior": {"mode": "disabled"},
+        },
+    )
+
+    pet = load_pet(folder)
+
+    assert pet.hover_interaction_enabled is False
+    assert pet.drag_animation_enabled is False
+
+
 def test_white_cell_background_becomes_transparent(tmp_path):
     folder = make_pet(tmp_path)
     atlas = Image.open(folder / "spritesheet.webp").convert("RGBA")

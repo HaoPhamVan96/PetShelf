@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QCursor, QMouseEvent, QPixmap
+from PySide6.QtGui import QAction, QColor, QCloseEvent, QCursor, QFont, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -110,8 +110,8 @@ class PetOverlay(QWidget):
 
     def set_pet(self, pet: Pet) -> None:
         self.pet = pet
-        self.base_width = pet.cell_width
-        self.base_height = pet.cell_height
+        self.base_width = pet.display_width
+        self.base_height = pet.display_height
         self.setFixedSize(round(self.base_width * self.display_scale), round(self.base_height * self.display_scale))
         self.label.setFixedSize(self.size())
         self.state = "idle"
@@ -144,7 +144,11 @@ class PetOverlay(QWidget):
             image,
             (self.state, self.frame_index, self.look_direction, self.border_color),
         )
-        self.label.setPixmap(self._scaled_pixmap(image))
+        pixmap = self._scaled_pixmap(image)
+        label = self._skill_label_text()
+        if label:
+            self._draw_skill_label(pixmap, label)
+        self.label.setPixmap(pixmap)
         duration = max(16, round(spec.durations_ms[self.frame_index] / self.animation_speed))
         self.timer.start(duration)
 
@@ -154,6 +158,32 @@ class PetOverlay(QWidget):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
+
+    def _skill_label_text(self) -> str:
+        if not self.pet or self.state in ANIMATIONS:
+            return ""
+        return self.pet.animation_display_name(self.state)
+
+    def _draw_skill_label(self, pixmap: QPixmap, text: str) -> None:
+        painter = QPainter(pixmap)
+        try:
+            font = QFont("Segoe UI", max(9, round(self.label.height() * 0.055)))
+            font.setBold(True)
+            painter.setFont(font)
+            metrics = painter.fontMetrics()
+            margin = max(6, round(self.label.width() * 0.025))
+            padding_x = 7
+            padding_y = 4
+            rect = metrics.boundingRect(text)
+            box_w = min(self.label.width() - margin * 2, rect.width() + padding_x * 2)
+            box_h = rect.height() + padding_y * 2
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(10, 18, 30, 190))
+            painter.drawRoundedRect(margin, margin, box_w, box_h, 6, 6)
+            painter.setPen(QPen(QColor(180, 235, 255), 1))
+            painter.drawText(margin + padding_x, margin + padding_y + metrics.ascent(), text)
+        finally:
+            painter.end()
 
     def _next_frame(self) -> None:
         if not self.pet:
@@ -225,12 +255,13 @@ class PetOverlay(QWidget):
             delta_x = global_position.x() - previous_position.x()
             self.last_drag_position = global_position
             self.move(global_position - self.drag_offset)
-            drag_state = drag_animation_for_delta(delta_x)
-            if drag_state and drag_state != self.state:
-                self.active_interaction = None
-                self.play_state(drag_state)
-            if drag_state:
-                self.drag_animation_active = True
+            if self.pet and self.pet.drag_animation_enabled:
+                drag_state = drag_animation_for_delta(delta_x)
+                if drag_state and drag_state != self.state:
+                    self.active_interaction = None
+                    self.play_state(drag_state)
+                if drag_state:
+                    self.drag_animation_active = True
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -343,11 +374,12 @@ class PetOverlay(QWidget):
         return True
 
     def enterEvent(self, event) -> None:
-        self.trigger_interaction("hover")
+        if self.pet and self.pet.hover_interaction_enabled:
+            self.trigger_interaction("hover")
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
-        if self.active_interaction == "hover" and self.pet:
+        if self.active_interaction == "hover" and self.pet and self.pet.hover_interaction_enabled:
             spec = self.pet.animation_spec(self.state)
             if spec and spec.loop:
                 self.active_interaction = None

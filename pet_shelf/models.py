@@ -41,6 +41,7 @@ class AnimationSpec:
     row: int
     durations_ms: tuple[int, ...]
     loop: bool = True
+    display_name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +74,13 @@ class Pet:
     atlas: Image.Image
     cell_width: int = CELL_WIDTH
     cell_height: int = CELL_HEIGHT
+    atlas_rows: int = STANDARD_ROWS
+    display_width: int = CELL_WIDTH
+    display_height: int = CELL_HEIGHT
     custom_animations: dict[str, AnimationSpec] = field(default_factory=dict)
     interactions: dict[str, InteractionSpec] = field(default_factory=dict)
+    drag_animation_enabled: bool = True
+    hover_interaction_enabled: bool = True
     _frame_cache: dict[tuple[str, int], Image.Image] = field(default_factory=dict, repr=False)
 
     def animation_spec(self, name: str) -> AnimationSpec | None:
@@ -84,7 +90,7 @@ class Pet:
         spec = self.animation_spec(state)
         if spec is None:
             raise PetLoadError(f"Unknown animation '{state}'")
-        if spec.row >= self.atlas.height // self.cell_height:
+        if spec.row >= self.atlas_rows:
             raise PetLoadError(f"Animation '{state}' is outside this spritesheet")
         index %= len(spec.durations_ms)
         cache_key = (state, index)
@@ -117,6 +123,12 @@ class Pet:
     @property
     def thumbnail(self) -> Image.Image:
         return self.frame("idle", 0)
+
+    def animation_display_name(self, name: str) -> str:
+        spec = self.animation_spec(name)
+        if spec and spec.display_name:
+            return spec.display_name
+        return name.replace("-", " ").title()
 
 
 def _required_text(data: dict, key: str, manifest: Path) -> str:
@@ -168,7 +180,7 @@ def _remove_connected_white_background(image: Image.Image) -> Image.Image:
     return rgba
 
 
-def _parse_custom_animations(data: dict) -> dict[str, AnimationSpec]:
+def _parse_custom_animations(data: dict, atlas_rows: int | None = None) -> dict[str, AnimationSpec]:
     parsed: dict[str, AnimationSpec] = {}
     raw_animations = data.get("animations", {})
     if not isinstance(raw_animations, dict):
@@ -178,6 +190,12 @@ def _parse_custom_animations(data: dict) -> dict[str, AnimationSpec]:
             continue
         source_row = raw.get("sourceRow")
         base = ANIMATIONS.get(source_row) if isinstance(source_row, str) else None
+        row_index = raw.get("sourceRowIndex")
+        if base is None and isinstance(source_row, int):
+            row_index = source_row
+        if base is None and isinstance(row_index, int) and row_index >= 0:
+            if atlas_rows is None or row_index < atlas_rows:
+                base = AnimationSpec(row_index, ANIMATIONS["idle"].durations_ms)
         if base is None:
             continue
         frame_count = raw.get("frameCount", len(base.durations_ms))
@@ -201,7 +219,8 @@ def _parse_custom_animations(data: dict) -> dict[str, AnimationSpec]:
             durations.extend([durations[-1]] * (frame_count - len(durations)))
         playback = raw.get("playback", "loop" if raw.get("loop") else "once")
         loop = bool(raw.get("loop", playback == "loop"))
-        parsed[name] = AnimationSpec(base.row, tuple(durations), loop)
+        display_name = raw.get("displayName", "")
+        parsed[name] = AnimationSpec(base.row, tuple(durations), loop, display_name if isinstance(display_name, str) else "")
     return parsed
 
 
@@ -266,19 +285,51 @@ def load_pet(folder: Path) -> Pet:
         raise PetLoadError(f"cannot decode spritesheet: {exc}") from exc
 
     expected_rows = EXTENDED_ROWS if version == 2 else STANDARD_ROWS
-    if atlas.width % ATLAS_COLUMNS != 0 or atlas.height % expected_rows != 0:
+    if atlas.width % ATLAS_COLUMNS != 0:
         raise PetLoadError(
             f"invalid atlas size {atlas.width}x{atlas.height}; "
             f"version {version} requires {ATLAS_COLUMNS} columns and {expected_rows} rows"
         )
     cell_width = atlas.width // ATLAS_COLUMNS
-    cell_height = atlas.height // expected_rows
+    atlas_rows = expected_rows
+    if atlas.height % expected_rows == 0:
+        cell_height = atlas.height // expected_rows
+    elif atlas.height % cell_width == 0 and atlas.height // cell_width >= expected_rows:
+        cell_height = cell_width
+        atlas_rows = atlas.height // cell_height
+    else:
+        raise PetLoadError(
+            f"invalid atlas size {atlas.width}x{atlas.height}; "
+            f"version {version} requires {ATLAS_COLUMNS} columns and at least {expected_rows} rows"
+        )
     if cell_width <= 0 or cell_height <= 0:
         raise PetLoadError("spritesheet cell size must be positive")
+    display_width = data.get("displayWidth", cell_width)
+    display_height = data.get("displayHeight", cell_height)
+    if not isinstance(display_width, int) or display_width <= 0:
+        display_width = cell_width
+    if not isinstance(display_height, int) or display_height <= 0:
+        display_height = cell_height
 
-    custom_animations = _parse_custom_animations(data)
+    custom_animations = _parse_custom_animations(data, atlas_rows)
     available = set(ANIMATIONS) | set(custom_animations)
     interactions = _parse_interactions(data, available)
+    raw_drag_behavior = data.get("dragBehavior")
+    drag_animation_enabled = True
+    if isinstance(raw_drag_behavior, dict):
+        mode = str(raw_drag_behavior.get("mode", "")).strip().lower()
+        if mode in {"none", "disabled", "off", "idle"}:
+            drag_animation_enabled = False
+    elif raw_drag_behavior is False:
+        drag_animation_enabled = False
+    raw_hover_behavior = data.get("hoverBehavior")
+    hover_interaction_enabled = True
+    if isinstance(raw_hover_behavior, dict):
+        mode = str(raw_hover_behavior.get("mode", "")).strip().lower()
+        if mode in {"none", "disabled", "off", "idle"}:
+            hover_interaction_enabled = False
+    elif raw_hover_behavior is False:
+        hover_interaction_enabled = False
     return Pet(
         folder,
         pet_id,
@@ -289,8 +340,13 @@ def load_pet(folder: Path) -> Pet:
         atlas,
         cell_width,
         cell_height,
+        atlas_rows,
+        display_width,
+        display_height,
         custom_animations,
         interactions,
+        drag_animation_enabled,
+        hover_interaction_enabled,
     )
 
 

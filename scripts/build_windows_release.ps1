@@ -15,7 +15,7 @@ if (-not (Test-Path $Python)) {
 
 & $Python -m pip install --upgrade pip
 & $Python -m pip install -r requirements-dev.txt
-& $Python -m PyInstaller --noconfirm --clean --windowed --name PetShelf --collect-all PIL run_pet_shelf.py
+& $Python -m PyInstaller --noconfirm --clean --windowed --name PetShelf --icon assets\petshelf.ico --add-data "assets;assets" --collect-all PIL run_pet_shelf.py
 
 $Outputs = Join-Path $Root "outputs"
 New-Item -ItemType Directory -Force -Path $Outputs | Out-Null
