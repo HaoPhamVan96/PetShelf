@@ -1,0 +1,33 @@
+{
+  "id": "itachi",
+  "displayName": "Itachi",
+  "description": "A calm chibi shinobi pet inspired by Itachi, with black hair, forehead protector, red-eyed focus, and a black cloak with red cloud motifs. Hover can trigger a one-shot Amaterasu transformation.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp",
+  "idleBehavior": {
+    "mode": "random",
+    "animations": ["idle", "waving", "waiting", "running", "review"]
+  },
+  "animations": {
+    "amaterasu": {
+      "sourceRow": "jumping",
+      "frameCount": 5,
+      "timingMs": [350, 400, 450, 500, 2400],
+      "durationMs": 4100,
+      "holdAfterDisappearanceMs": 2400,
+      "playback": "once",
+      "loop": false,
+      "description": "Sharingan opens, a red-black eye circle expands outward, then Amaterasu starts from the eye, wraps the body, Itachi disappears, and the flame-only state holds for about 2-3 seconds."
+    }
+  },
+  "interactions": {
+    "hover": {
+      "animation": "amaterasu",
+      "mode": "single",
+      "playback": "once",
+      "trigger": "hover",
+      "event": "pointerenter",
+      "click": false
+    }
+  }
+}

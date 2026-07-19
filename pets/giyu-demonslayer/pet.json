@@ -1,0 +1,168 @@
+{
+  "id": "giyu-demonslayer",
+  "displayName": "Giyu-demonslayer",
+  "description": "A quiet, restrained Demon Slayer-inspired water swordsman pet with melancholic seriousness.",
+  "spritesheetPath": "spritesheet.png",
+  "kind": "person",
+  "hoverBehavior": {
+    "mode": "disabled"
+  },
+  "dragBehavior": {
+    "mode": "disabled"
+  },
+  "interactions": {
+    "click": {
+      "animations": [
+        "form-1-water-surface-slash",
+        "form-2-water-wheel",
+        "form-3-flowing-dance",
+        "form-4-striking-tide",
+        "form-5-blessed-rain",
+        "form-6-whirlpool",
+        "form-8-waterfall-basin",
+        "form-10-constant-flux"
+      ],
+      "mode": "cycle"
+    }
+  },
+  "animations": {
+    "form-2-water-wheel": {
+      "displayName": "Form 2 Water Wheel",
+      "sourceRow": "running",
+      "frameCount": 6,
+      "timingMs": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "durationMs": 820,
+      "repeatCount": 2,
+      "playbackSource": "spritesheet",
+      "spriteSheetPlayback": {"path": "spritesheet.png", "row": "running", "rowIndex": 7, "frameRange": [0, 5], "playback": "once", "repeatCount": 2},
+      "playback": "once",
+      "loop": false,
+      "description": "Water Breathing Second Form: a rotating vertical water wheel."
+    },
+    "form-1-water-surface-slash": {
+      "displayName": "Form 1 Water Surface Slash",
+      "sourceRow": "review",
+      "frameCount": 8,
+      "timingMs": [180, 140, 120, 120, 180, 180, 160, 240],
+      "durationMs": 1320,
+      "repeatCount": 2,
+      "playbackSource": "spritesheet",
+      "spriteSheetPlayback": {"path": "spritesheet.png", "row": "review", "rowIndex": 8, "frameRange": [0, 7], "playback": "once", "repeatCount": 2},
+      "playback": "once",
+      "loop": false,
+      "description": "Water Breathing First Form: Water Surface Slash. A precise horizontal katana cut with one compact crescent of flowing water, foam, spray and small surface ripples."
+    },
+    "form-3-flowing-dance": {
+      "displayName": "Form 3 Flowing Dance",
+      "sourceRow": "waving",
+      "frameCount": 8,
+      "timingMs": [180, 160, 160, 180, 180, 180, 180, 260],
+      "durationMs": 1440,
+      "repeatCount": 2,
+      "playbackSource": "spritesheet",
+      "spriteSheetPlayback": {"path": "spritesheet.png", "row": "waving", "rowIndex": 3, "frameRange": [0, 7], "playback": "once", "repeatCount": 2},
+      "playback": "once",
+      "loop": false,
+      "description": "Water Breathing Third Form: Flowing Dance. A continuous circular sword dance with connected S-shaped water currents and a balanced recovery."
+    },
+    "form-4-striking-tide": {
+      "displayName": "Form 4 Striking Tide",
+      "sourceRow": "running-left",
+      "frameCount": 8,
+      "timingMs": [
+        140,
+        140,
+        160,
+        180,
+        200,
+        180,
+        160,
+        220
+      ],
+      "durationMs": 1380,
+      "repeatCount": 2,
+      "playbackSource": "spritesheet",
+      "spriteSheetPlayback": {"path": "spritesheet.png", "row": "running-left", "rowIndex": 2, "frameRange": [0, 7], "playback": "once", "repeatCount": 2},
+      "playback": "once",
+      "loop": false,
+      "description": "Water Breathing Fourth Form: an 8-frame wider-cell low horizontal Striking Tide with full wave, follow-through, and recede."
+    },
+    "form-5-blessed-rain": {
+      "displayName": "Form 5 Blessed Rain After the Drought",
+      "sourceRow": "waiting",
+      "frameCount": 8,
+      "timingMs": [220, 180, 180, 200, 260, 220, 180, 300],
+      "durationMs": 1740,
+      "repeatCount": 2,
+      "playbackSource": "spritesheet",
+      "spriteSheetPlayback": {"path": "spritesheet.png", "row": "waiting", "rowIndex": 6, "frameRange": [0, 7], "playback": "once", "repeatCount": 2},
+      "playback": "once",
+      "loop": false,
+      "description": "Water Breathing Fifth Form: Blessed Rain After the Drought. A calm mercy slash with gentle rain, delicate blue ribbons, light droplets and fading ripples."
+    },
+    "form-6-whirlpool": {
+      "displayName": "Form 6 Whirlpool",
+      "sourceRow": "running-right",
+      "frameCount": 8,
+      "timingMs": [
+        120,
+        120,
+        140,
+        160,
+        180,
+        180,
+        160,
+        220
+      ],
+      "durationMs": 1280,
+      "repeatCount": 2,
+      "playbackSource": "spritesheet",
+      "spriteSheetPlayback": {"path": "spritesheet.png", "row": "running-right", "rowIndex": 1, "frameRange": [0, 7], "playback": "once", "repeatCount": 2},
+      "playback": "once",
+      "loop": false,
+      "description": "Water Breathing Sixth Form: an 8-frame wider-cell whirlpool with full circular water arcs, peak spin, slash, and recede."
+    },
+    "form-10-constant-flux": {
+      "displayName": "Form 10 Constant Flux",
+      "sourceRow": "jumping",
+      "frameCount": 8,
+      "timingMs": [
+        140,
+        140,
+        160,
+        180,
+        200,
+        220,
+        260,
+        300
+      ],
+      "durationMs": 1600,
+      "repeatCount": 2,
+      "playbackSource": "spritesheet",
+      "spriteSheetPlayback": {"path": "spritesheet.png", "row": "jumping", "rowIndex": 4, "frameRange": [0, 4], "playback": "once", "repeatCount": 2},
+      "playback": "once",
+      "loop": false,
+      "description": "Water Breathing Tenth Form: a water dragon grows through a continuous flowing attack, then recedes."
+    },
+    "form-8-waterfall-basin": {
+      "displayName": "Form 8 Waterfall Basin",
+      "sourceRow": "failed",
+      "frameCount": 8,
+      "timingMs": [160, 160, 180, 220, 260, 220, 180, 300],
+      "durationMs": 1680,
+      "repeatCount": 2,
+      "playbackSource": "spritesheet",
+      "spriteSheetPlayback": {"path": "spritesheet.png", "row": "failed", "rowIndex": 5, "frameRange": [0, 7], "playback": "once", "repeatCount": 2},
+      "playback": "once",
+      "loop": false,
+      "description": "Water Breathing Eighth Form: Waterfall Basin. Giyu raises his blade as a vertical blue-white waterfall descends, peaks in a basin-like splash, then recedes."
+    }
+  }
+}

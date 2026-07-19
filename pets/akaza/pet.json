@@ -1,0 +1,21 @@
+{
+  "id": "akaza",
+  "displayName": "Akaza",
+  "description": "A compact Codex digital pet inspired by Akaza from Demon Slayer, with Void Style: Annihilation Type on the standard click animation.",
+  "spritesheetPath": "spritesheet.webp",
+  "kind": "object",
+  "animations": {
+    "voidStyleAnnihilation": {
+      "sourceRow": "waving",
+      "frameCount": 4,
+      "timingMs": [180, 220, 260, 420],
+      "durationMs": 1080,
+      "playback": "once",
+      "loop": false,
+      "description": "Click Akaza to charge a blue sphere, release the Void Style beam, and return to cooldown."
+    }
+  },
+  "actions": {
+    "voidStyleAnnihilation": "voidStyleAnnihilation"
+  }
+}
