@@ -191,6 +191,10 @@ def _parse_custom_animations(data: dict, atlas_rows: int | None = None) -> dict[
         source_row = raw.get("sourceRow")
         base = ANIMATIONS.get(source_row) if isinstance(source_row, str) else None
         row_index = raw.get("sourceRowIndex")
+        if row_index is None:
+            nested_playback = raw.get("spriteSheetPlayback", {})
+            if isinstance(nested_playback, dict):
+                row_index = nested_playback.get("rowIndex")
         if base is None and isinstance(source_row, int):
             row_index = source_row
         if base is None and isinstance(row_index, int) and row_index >= 0:

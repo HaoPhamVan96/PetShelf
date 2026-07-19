@@ -134,6 +134,35 @@ def test_custom_animation_can_use_extra_row_index(tmp_path):
     assert pet.interactions["click"].animations == ("extra-form",)
 
 
+def test_custom_animation_can_use_named_source_row_with_nested_row_index(tmp_path):
+    folder = make_pet(tmp_path, version=1, size=(1536, 10 * 192))
+    atlas = Image.open(folder / "spritesheet.webp").convert("RGBA")
+    for y in range(9 * 192, 10 * 192):
+        for x in range(3 * 192, 4 * 192):
+            atlas.putpixel((x, y), (30, 140, 245, 255))
+    atlas.save(folder / "spritesheet.webp", lossless=True)
+    data = json.loads((folder / "pet.json").read_text())
+    data["animations"] = {
+        "custom-form-7": {
+            "displayName": "Form 7 Drop Ripple Thrust",
+            "sourceRow": "custom-form-7",
+            "frameCount": 4,
+            "timingMs": [100, 100, 100, 100],
+            "spriteSheetPlayback": {"rowIndex": 9},
+            "playback": "once",
+        }
+    }
+    data["interactions"] = {"click": {"animations": ["custom-form-7"], "mode": "cycle"}}
+    (folder / "pet.json").write_text(json.dumps(data), encoding="utf-8")
+
+    pet = load_pet(folder)
+
+    assert pet.animation_spec("custom-form-7").row == 9
+    assert pet.animation_display_name("custom-form-7") == "Form 7 Drop Ripple Thrust"
+    assert pet.frame("custom-form-7", 3).getpixel((96, 96)) == (30, 140, 245, 255)
+    assert pet.interactions["click"].animations == ("custom-form-7",)
+
+
 def test_hover_and_drag_behavior_can_be_disabled(tmp_path):
     folder = make_pet(
         tmp_path,

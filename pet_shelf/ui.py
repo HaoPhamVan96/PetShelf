@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QCursor, QFont, QMouseEvent, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QColor, QCloseEvent, QCursor, QFont, QIcon, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
