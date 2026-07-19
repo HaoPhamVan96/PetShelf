@@ -1,7 +1,0 @@
-Create one clean full-body reference sprite for Codex pet Charizard.
-
-Pet identity: Faithfully match the supplied reference: a stocky, dark-orange Charizard with a very large pale cream belly, dark brown chest/shoulder mass, long thick tail curled left, blackish teal wing membranes, white claws, horned head, and a signature attached crown of intense orange-yellow flames flowing from shoulders/back plus a tail flame. Keep the flame mass visibly attached to the body, not floating. Full body, portrait-like strong stance, no trainer, no logo or text..
-Style: Pet-safe sprite: compact full-body mascot, readable in a 192x208 cell, clear silhouette, simple face, stable palette/materials, and crisp edges for chroma-key extraction. Style `flat-vector`: Flat vector-style mascot with simple geometric forms, crisp color areas, clean outline, and minimal shading. User style notes: Clean sharp cel-shaded illustrated Pokémon style. Preserve the dramatic high-contrast fiery silhouette and anatomy of the supplied art. Flat solid magenta chroma background only..
-
-
-Place a single centered pose on a perfectly flat pure blue #0000FF chroma-key background. Keep the full pet visible, compact, readable at 192x208, and easy to animate. Preserve approved reference identity cues. No scenery, text, borders, checkerboard transparency, shadows, glows, detached effects, or extra props. Keep #0000FF and close colors out of the pet, props, highlights, and effects.
