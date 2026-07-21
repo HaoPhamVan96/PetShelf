@@ -63,14 +63,16 @@ Khi minimize Pet Shelf hoặc chuyển sang ứng dụng khác, pet vẫn tiếp
 - **Open Pet Folder**: chọn/thay thư mục cha chứa pet.
 - **Refresh**: quét lại toàn bộ danh sách.
 - **PetDex**: mở gallery PetDex, tìm kiếm và cài pet bằng CLI chính thức; app tự đồng bộ vào thư mục đang chọn và refresh danh sách.
-- **Settings popup**: gom Follow Cursor, Speed slider, Pet size, Cycle animations và Pet Outline vào một cửa sổ gọn.
+- **Settings popup**: gom Follow Cursor, Speed slider, Pet size, Cycle animations, Loop, Show action name và Pet Outline vào một cửa sổ gọn.
 - **Follow Cursor**: pet v2 dùng 16 ô look-direction để nhìn theo con trỏ, gồm cả trái/phải.
 - **Speed slider**: kéo tốc độ toàn bộ animation từ `0.1×` đến `5×`; timing gốc vẫn lấy từ JSON.
 - **Pet size**: phóng/thu đồng thời mọi pet từ `50%` đến `300%` mà vẫn giữ tỉ lệ khung hình.
 - **Cycle animations automatically**: khi bật, pet đang idle sẽ tự chuyển sang một animation ngẫu nhiên (waving, jumping, waiting…) sau mỗi 6–15 giây rồi quay lại idle; tự tạm dừng khi đang kéo, hover hoặc click.
+- **Loop**: khi bật, pet đang idle sẽ tự chọn action ngẫu nhiên và nối ngay action tiếp theo khi action hiện tại kết thúc.
+- **Show action name**: khi bật, tên action tùy chỉnh được hiển thị trên pet trong lúc action đang chạy; khi tắt, action vẫn chạy nhưng không hiện tên.
 - **Pet Outline**: viền mảnh 1px ôm theo alpha/silhouette; khi tắt, renderer trả nguyên frame không thêm viền Qt hay raster.
 
-App nhớ thư mục, danh sách pet đang hiển thị, tốc độ, kích thước pet (50%–300%), follow-pointer, cycle animations và màu viền giữa các lần chạy.
+App nhớ thư mục, danh sách pet đang hiển thị, tốc độ, kích thước pet (50%–300%), follow-pointer, cycle animations, Loop, Show action name và màu viền giữa các lần chạy.
 
 Nếu `pet.json` có `interactions.hover`, `interactions.click` và các animation tùy chỉnh
 trong `animations`, Pet Shelf sẽ phát đúng `sourceRow`, `frameCount`, `timingMs` và
@@ -97,6 +99,8 @@ pip install -r requirements-dev.txt
 chmod +x scripts/build_macos.sh
 ./scripts/build_macos.sh
 ```
+
+Hoặc double-click `build-macos.command` để tự tạo venv, cài dependency và build `dist/PetShelf.app`. File `build-macos.bat` chỉ hiển thị hướng dẫn trên Windows; `.app` phải được build trực tiếp trên máy macOS.
 
 Windows (chạy trên máy Windows):
 

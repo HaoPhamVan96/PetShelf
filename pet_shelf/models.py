@@ -295,17 +295,39 @@ def load_pet(folder: Path) -> Pet:
             f"version {version} requires {ATLAS_COLUMNS} columns and {expected_rows} rows"
         )
     cell_width = atlas.width // ATLAS_COLUMNS
-    atlas_rows = expected_rows
-    if atlas.height % expected_rows == 0:
-        cell_height = atlas.height // expected_rows
-    elif atlas.height % cell_width == 0 and atlas.height // cell_width >= expected_rows:
-        cell_height = cell_width
+    requested_cell_height = data.get("cellHeight")
+    requested_atlas_rows = data.get("atlasRows")
+    if isinstance(requested_cell_height, int) and requested_cell_height > 0:
+        cell_height = requested_cell_height
+        if atlas.height % cell_height != 0:
+            raise PetLoadError(
+                f"invalid atlas size {atlas.width}x{atlas.height}; "
+                f"cellHeight {cell_height} does not divide atlas height"
+            )
         atlas_rows = atlas.height // cell_height
+        if isinstance(requested_atlas_rows, int) and requested_atlas_rows > 0:
+            if atlas_rows != requested_atlas_rows:
+                raise PetLoadError(
+                    f"invalid atlas size {atlas.width}x{atlas.height}; "
+                    f"atlasRows {requested_atlas_rows} does not match cellHeight {cell_height}"
+                )
+        elif atlas_rows < expected_rows:
+            raise PetLoadError(
+                f"invalid atlas size {atlas.width}x{atlas.height}; "
+                f"version {version} requires at least {expected_rows} rows"
+            )
     else:
-        raise PetLoadError(
-            f"invalid atlas size {atlas.width}x{atlas.height}; "
-            f"version {version} requires {ATLAS_COLUMNS} columns and at least {expected_rows} rows"
-        )
+        atlas_rows = expected_rows
+        if atlas.height % expected_rows == 0:
+            cell_height = atlas.height // expected_rows
+        elif atlas.height % cell_width == 0 and atlas.height // cell_width >= expected_rows:
+            cell_height = cell_width
+            atlas_rows = atlas.height // cell_height
+        else:
+            raise PetLoadError(
+                f"invalid atlas size {atlas.width}x{atlas.height}; "
+                f"version {version} requires {ATLAS_COLUMNS} columns and at least {expected_rows} rows"
+            )
     if cell_width <= 0 or cell_height <= 0:
         raise PetLoadError("spritesheet cell size must be positive")
     display_width = data.get("displayWidth", cell_width)

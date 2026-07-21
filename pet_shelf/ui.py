@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .models import ANIMATIONS, Pet, PetLoadError, add_silhouette_outline, scan_pet_root
+from .models import ANIMATIONS, AnimationSpec, Pet, PetLoadError, add_silhouette_outline, scan_pet_root
 from .editor import SpriteEditorDialog
 from .petdex import PetDexDialog
 
@@ -61,6 +61,10 @@ def drag_animation_for_delta(delta_x: int) -> str | None:
     if delta_x > 0:
         return "running-right"
     return None
+
+
+def animation_cycle_should_end(spec: AnimationSpec, active_interaction: str | None) -> bool:
+    return not spec.loop or active_interaction == "click"
 
 
 def open_in_file_manager(path: Path) -> None:
@@ -119,6 +123,8 @@ class PetOverlay(QWidget):
         self.border_enabled = False
         self.border_color = "#202124"
         self.cycle_enabled = False
+        self.loop_enabled = False
+        self.show_action_name = True
         self.outline_cache: dict[tuple[str, int, int | None, str], object] = {}
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
@@ -185,7 +191,7 @@ class PetOverlay(QWidget):
         )
 
     def _skill_label_text(self) -> str:
-        if not self.pet or self.state in ANIMATIONS:
+        if not self.show_action_name or not self.pet or self.state in ANIMATIONS:
             return ""
         return self.pet.animation_display_name(self.state)
 
@@ -218,9 +224,15 @@ class PetOverlay(QWidget):
             self.play_state("idle")
             return
         count = len(spec.durations_ms)
-        if self.frame_index + 1 >= count and not spec.loop:
+        if self.frame_index + 1 >= count and animation_cycle_should_end(spec, self.active_interaction):
+            was_cycle = self.active_interaction == "cycle"
+            self.cycle_end_timer.stop()
             self.active_interaction = None
             self.play_state("idle")
+            if self.loop_enabled and was_cycle:
+                self._cycle_tick()
+            elif self.loop_enabled and self.isVisible():
+                self._cycle_tick()
             return
         self.frame_index = (self.frame_index + 1) % count
         self._render_frame()
@@ -235,7 +247,9 @@ class PetOverlay(QWidget):
         self.raise_()
         self._render_frame()
         self.look_timer.start()
-        if self.cycle_enabled:
+        if self.loop_enabled:
+            self._cycle_tick()
+        elif self.cycle_enabled:
             self._schedule_cycle()
 
     def hide_pet(self) -> None:
@@ -308,6 +322,8 @@ class PetOverlay(QWidget):
         elif self.drag_animation_active:
             self.active_interaction = None
             self.play_state("idle")
+            if self.loop_enabled:
+                self._cycle_tick()
         self.drag_animation_active = False
         super().mouseReleaseEvent(event)
 
@@ -368,18 +384,36 @@ class PetOverlay(QWidget):
         else:
             self.cycle_timer.stop()
             self.cycle_end_timer.stop()
-            if self.active_interaction == "cycle":
+            if self.active_interaction == "cycle" and not self.loop_enabled:
                 self.active_interaction = None
                 self.play_state("idle")
 
+    def set_loop_mode(self, enabled: bool) -> None:
+        self.loop_enabled = enabled
+        if enabled:
+            if self.isVisible() and self.state == "idle" and self.active_interaction is None:
+                self._cycle_tick()
+        else:
+            self.cycle_end_timer.stop()
+            if self.active_interaction == "cycle":
+                self.active_interaction = None
+                self.play_state("idle")
+            elif self.cycle_enabled and self.isVisible():
+                self._schedule_cycle()
+
+    def set_show_action_name(self, enabled: bool) -> None:
+        self.show_action_name = enabled
+        if self.pet:
+            self._render_frame()
+
     def _schedule_cycle(self) -> None:
-        if not self.cycle_enabled:
+        if not self.cycle_enabled or self.loop_enabled:
             return
         delay = random.randint(self.CYCLE_MIN_DELAY_MS, self.CYCLE_MAX_DELAY_MS)
         self.cycle_timer.start(max(500, round(delay / self.animation_speed)))
 
     def _cycle_tick(self) -> None:
-        if not self.cycle_enabled or not self.pet:
+        if (not self.cycle_enabled and not self.loop_enabled) or not self.pet:
             return
         if self.state != "idle" or self.active_interaction is not None or self.drag_offset is not None:
             self._schedule_cycle()
@@ -402,7 +436,10 @@ class PetOverlay(QWidget):
         if self.active_interaction == "cycle":
             self.active_interaction = None
             self.play_state("idle")
-        self._schedule_cycle()
+        if self.loop_enabled:
+            self._cycle_tick()
+        else:
+            self._schedule_cycle()
 
     def _update_pointer_look(self) -> None:
         if (
@@ -440,6 +477,8 @@ class PetOverlay(QWidget):
         interaction = self.pet.interactions.get(event_name)
         if not interaction:
             return False
+        if self.active_interaction == "cycle":
+            self.cycle_end_timer.stop()
         index = self.interaction_indices.get(event_name, 0)
         if interaction.mode == "cycle":
             animation = interaction.animations[index % len(interaction.animations)]
@@ -461,6 +500,8 @@ class PetOverlay(QWidget):
             if spec and spec.loop:
                 self.active_interaction = None
                 self.play_state("idle")
+                if self.loop_enabled:
+                    self._cycle_tick()
         super().leaveEvent(event)
 
 
@@ -517,6 +558,8 @@ class SettingsDialog(QDialog):
     border_changed = Signal(bool, str)
     follow_changed = Signal(bool)
     cycle_changed = Signal(bool)
+    loop_changed = Signal(bool)
+    show_action_name_changed = Signal(bool)
 
     def __init__(
         self,
@@ -526,6 +569,8 @@ class SettingsDialog(QDialog):
         border_color: str,
         follow_pointer: bool,
         cycle_mode: bool,
+        loop_mode: bool,
+        show_action_name: bool,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -582,6 +627,17 @@ class SettingsDialog(QDialog):
         self.cycle_check.setChecked(cycle_mode)
         self.cycle_check.toggled.connect(self.cycle_changed.emit)
         layout.addWidget(self.cycle_check)
+
+        self.loop_check = QCheckBox("Loop")
+        self.loop_check.setToolTip("Randomly play another action as soon as the current action ends")
+        self.loop_check.setChecked(loop_mode)
+        self.loop_check.toggled.connect(self.loop_changed.emit)
+        layout.addWidget(self.loop_check)
+
+        self.show_action_name_check = QCheckBox("Show action name")
+        self.show_action_name_check.setChecked(show_action_name)
+        self.show_action_name_check.toggled.connect(self.show_action_name_changed.emit)
+        layout.addWidget(self.show_action_name_check)
 
         border_row = QHBoxLayout()
         self.border_check = QCheckBox("Pet outline (1px)")
@@ -656,6 +712,8 @@ class MainWindow(QMainWindow):
         self.border_color = str(self.settings.value("borderColor", "#202124"))
         self.follow_pointer = self.settings.value("followPointer", True, type=bool)
         self.cycle_mode = self.settings.value("cycleMode", False, type=bool)
+        self.loop_mode = self.settings.value("loopMode", False, type=bool)
+        self.show_action_name = self.settings.value("showActionName", True, type=bool)
         self.settings_dialog: SettingsDialog | None = None
 
         central = QWidget()
@@ -821,6 +879,8 @@ class MainWindow(QMainWindow):
                 self.border_color,
                 self.follow_pointer,
                 self.cycle_mode,
+                self.loop_mode,
+                self.show_action_name,
                 self,
             )
             dialog.speed_changed.connect(self.change_animation_speed)
@@ -828,6 +888,8 @@ class MainWindow(QMainWindow):
             dialog.border_changed.connect(self.apply_border)
             dialog.follow_changed.connect(self.toggle_follow_pointer)
             dialog.cycle_changed.connect(self.toggle_cycle_mode)
+            dialog.loop_changed.connect(self.toggle_loop_mode)
+            dialog.show_action_name_changed.connect(self.toggle_show_action_name)
             dialog.finished.connect(lambda: setattr(self, "settings_dialog", None))
             self.settings_dialog = dialog
         self.settings_dialog.show()
@@ -853,6 +915,18 @@ class MainWindow(QMainWindow):
         self.settings.setValue("cycleMode", enabled)
         for overlay in self.overlays.values():
             overlay.set_cycle_mode(enabled)
+
+    def toggle_loop_mode(self, enabled: bool) -> None:
+        self.loop_mode = enabled
+        self.settings.setValue("loopMode", enabled)
+        for overlay in self.overlays.values():
+            overlay.set_loop_mode(enabled)
+
+    def toggle_show_action_name(self, enabled: bool) -> None:
+        self.show_action_name = enabled
+        self.settings.setValue("showActionName", enabled)
+        for overlay in self.overlays.values():
+            overlay.set_show_action_name(enabled)
 
     def refresh(self) -> None:
         if not self.root:
@@ -919,6 +993,8 @@ class MainWindow(QMainWindow):
         overlay.set_border(self.border_enabled, self.border_color)
         overlay.set_follow_pointer(self.follow_pointer)
         overlay.set_cycle_mode(self.cycle_mode)
+        overlay.set_loop_mode(self.loop_mode)
+        overlay.set_show_action_name(self.show_action_name)
         overlay.set_pet(pet)
         overlay.hidden_by_user.connect(self._overlay_hidden)
         slot = len(self.overlays)
