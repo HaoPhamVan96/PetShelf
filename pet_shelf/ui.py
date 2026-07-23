@@ -6,10 +6,11 @@ import random
 import shutil
 import subprocess
 import sys
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QCursor, QFont, QIcon, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -37,7 +38,7 @@ from PySide6.QtWidgets import (
 from .models import ANIMATIONS, AnimationSpec, Pet, PetLoadError, add_silhouette_outline, scan_pet_root
 from .editor import SpriteEditorDialog
 from .petdex import PetDexDialog
-from .updater import UpdateInfo, UpdateWorker, install_after_exit
+from .updater import UpdateInfo, check_latest_release, download_update, install_after_exit
 
 
 def pixmap_from_pil(image) -> QPixmap:
@@ -717,11 +718,15 @@ class MainWindow(QMainWindow):
         self.loop_mode = self.settings.value("loopMode", False, type=bool)
         self.show_action_name = self.settings.value("showActionName", True, type=bool)
         self.settings_dialog: SettingsDialog | None = None
-        self.update_thread: QThread | None = None
-        self.update_worker: UpdateWorker | None = None
+        self.update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="petshelf-update")
+        self.update_future: Future | None = None
+        self.update_job: str | None = None
+        self.update_silent = False
+        self.download_progress = 0
         self.pending_update: UpdateInfo | None = None
         self.downloaded_update_path: str | None = None
         self.update_dialog: QDialog | None = None
+        self.download_ui: tuple[QLabel, QProgressBar, QPushButton, QPushButton, QPushButton] | None = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -785,35 +790,40 @@ class MainWindow(QMainWindow):
         if not silent and self.pending_update is not None:
             self._offer_update(self.pending_update)
             return
-        if self.update_thread and self.update_thread.isRunning():
+        if self.update_future and not self.update_future.done():
             return
         self.update_button.setEnabled(False)
         self.update_button.setText("Checking…")
-        thread = QThread(self)
-        worker = UpdateWorker()
-        worker.moveToThread(thread)
-        thread.started.connect(worker.check)
-        worker.checked.connect(
-            lambda info: self._update_checked(info, silent),
-            Qt.ConnectionType.QueuedConnection,
-        )
-        worker.failed.connect(
-            lambda message: self._update_failed(message, silent),
-            Qt.ConnectionType.QueuedConnection,
-        )
-        worker.checked.connect(lambda _info: thread.quit())
-        worker.failed.connect(lambda _message: thread.quit())
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda: self._clear_update_worker(thread))
-        self.update_thread = thread
-        self.update_worker = worker
-        thread.start()
+        self.update_silent = silent
+        self.update_job = "check"
+        self.update_future = self.update_executor.submit(check_latest_release)
+        QTimer.singleShot(50, self._poll_update_job)
 
-    def _clear_update_worker(self, thread: QThread) -> None:
-        if self.update_thread is thread:
-            self.update_thread = None
-            self.update_worker = None
+    def _poll_update_job(self) -> None:
+        future = self.update_future
+        if future is None:
+            return
+        if self.update_job == "download":
+            self._set_download_progress(self.download_progress)
+        if not future.done():
+            QTimer.singleShot(50, self._poll_update_job)
+            return
+        job = self.update_job
+        self.update_future = None
+        self.update_job = None
+        try:
+            result = future.result()
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"
+            if job == "check":
+                self._update_failed(message, self.update_silent)
+            else:
+                self._download_failed(message)
+            return
+        if job == "check":
+            self._update_checked(result, self.update_silent)
+        elif job == "download":
+            self._download_ready(str(result))
 
     def _update_checked(self, info: UpdateInfo | None, silent: bool) -> None:
         self.update_button.setEnabled(True)
@@ -871,7 +881,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(reload_button)
         layout.addLayout(buttons)
         self.update_dialog = dialog
-        dialog.finished.connect(lambda: setattr(self, "update_dialog", None))
+        dialog.finished.connect(self._clear_update_dialog)
         later_button.clicked.connect(dialog.close)
         download_button.clicked.connect(
             lambda: self._download_update(
@@ -895,49 +905,34 @@ class MainWindow(QMainWindow):
         later_button: QPushButton,
         reload_button: QPushButton,
     ) -> None:
-        if self.update_thread and self.update_thread.isRunning():
+        if self.update_future and not self.update_future.done():
             return
         download_button.setEnabled(False)
         later_button.setEnabled(False)
         progress.show()
         status.setText(f"Downloading {info.asset_name}…")
-        thread = QThread(self)
-        worker = UpdateWorker()
-        worker.moveToThread(thread)
-        thread.started.connect(lambda: worker.download(info))
-        worker.progress.connect(
-            lambda value: (progress.setValue(value), status.setText(f"Downloading… {value}%")),
-            Qt.ConnectionType.QueuedConnection,
+        self.download_ui = (status, progress, download_button, later_button, reload_button)
+        self.download_progress = 0
+        self.update_job = "download"
+        self.update_future = self.update_executor.submit(
+            lambda: download_update(info, lambda value: setattr(self, "download_progress", value))
         )
-        worker.downloaded.connect(
-            lambda path: self._download_ready(
-                path, status, progress, download_button, later_button, reload_button, thread
-            ),
-            Qt.ConnectionType.QueuedConnection,
-        )
-        worker.failed.connect(
-            lambda message: self._download_failed(
-                message, status, progress, download_button, later_button, thread
-            ),
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self.update_thread = thread
-        self.update_worker = worker
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda: self._clear_update_worker(thread))
-        thread.start()
+        QTimer.singleShot(50, self._poll_update_job)
+
+    def _set_download_progress(self, value: int) -> None:
+        if not self.download_ui:
+            return
+        status, progress, _download_button, _later_button, _reload_button = self.download_ui
+        progress.setValue(value)
+        status.setText(f"Downloading… {value}%")
 
     def _download_ready(
         self,
         path: str,
-        status: QLabel,
-        progress: QProgressBar,
-        download_button: QPushButton,
-        later_button: QPushButton,
-        reload_button: QPushButton,
-        thread: QThread,
     ) -> None:
+        if not self.download_ui:
+            return
+        status, progress, download_button, later_button, reload_button = self.download_ui
         try:
             from .updater import validate_update_archive
 
@@ -948,7 +943,6 @@ class MainWindow(QMainWindow):
             download_button.setText("Retry download")
             download_button.setEnabled(True)
             later_button.setEnabled(True)
-            thread.quit()
             return
         self.downloaded_update_path = path
         self.pending_update = None
@@ -957,7 +951,6 @@ class MainWindow(QMainWindow):
         download_button.hide()
         later_button.setEnabled(True)
         reload_button.show()
-        thread.quit()
 
     def _reload_after_update(
         self,
@@ -985,18 +978,19 @@ class MainWindow(QMainWindow):
     def _download_failed(
         self,
         message: str,
-        status: QLabel,
-        progress: QProgressBar,
-        download_button: QPushButton,
-        later_button: QPushButton,
-        thread: QThread,
     ) -> None:
+        if not self.download_ui:
+            return
+        status, progress, download_button, later_button, _reload_button = self.download_ui
         status.setText(message or "Download failed. Please try again.")
         progress.hide()
         download_button.setText("Retry download")
         download_button.setEnabled(True)
         later_button.setEnabled(True)
-        thread.quit()
+
+    def _clear_update_dialog(self) -> None:
+        self.update_dialog = None
+        self.download_ui = None
 
     def _setup_tray_icon(self) -> None:
         icon = tray_icon_pixmap()

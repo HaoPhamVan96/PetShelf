@@ -97,6 +97,21 @@ class UpdateWorker(QObject):
             self.failed.emit(f"{type(exc).__name__}: {exc}".strip())
 
 
+def download_update(info: UpdateInfo, progress_callback=None) -> str:
+    """Download an update archive and return its path without touching the UI."""
+    destination = Path(tempfile.gettempdir()) / f"PetShelf-{info.version}.zip"
+    request = urllib.request.Request(info.download_url, headers={"User-Agent": "PetShelf-Updater"})
+    with urllib.request.urlopen(request, timeout=30) as response, destination.open("wb") as output:
+        total = int(response.headers.get("Content-Length", "0"))
+        received = 0
+        while chunk := response.read(1024 * 256):
+            output.write(chunk)
+            received += len(chunk)
+            if total and progress_callback:
+                progress_callback(min(100, round(received * 100 / total)))
+    return str(destination)
+
+
 def _application_path() -> Path:
     executable = Path(sys.executable).resolve()
     if sys.platform == "darwin":
