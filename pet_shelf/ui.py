@@ -859,7 +859,11 @@ class MainWindow(QMainWindow):
         title = QLabel(f"A new Pet Shelf version ({info.version}) is available.")
         title.setStyleSheet("font-size: 17px; font-weight: 600;")
         layout.addWidget(title)
-        notes = QLabel(info.notes.strip() or "Download the latest version to get new features and fixes.")
+        notes = QLabel(
+            f"Released by: {info.author}\n"
+            f"Changes: {info.description.strip() or 'No release description.'}\n\n"
+            f"{info.notes.strip() or 'Download the latest version to get new features and fixes.'}"
+        )
         notes.setWordWrap(True)
         layout.addWidget(notes)
         status = QLabel("Ready to download.")

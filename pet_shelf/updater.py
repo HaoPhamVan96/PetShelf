@@ -35,6 +35,8 @@ def version_tuple(value: str) -> tuple[int, ...]:
 class UpdateInfo:
     version: str
     notes: str
+    author: str
+    description: str
     download_url: str
     asset_name: str
 
@@ -65,7 +67,14 @@ def check_latest_release() -> UpdateInfo | None:
     )
     if not download_url:
         raise RuntimeError(f"Release {version} does not contain {wanted}")
-    return UpdateInfo(version, str(manifest.get("notes") or ""), str(download_url), wanted)
+    return UpdateInfo(
+        version=version,
+        notes=str(manifest.get("notes") or ""),
+        author=str(manifest.get("author") or "Unknown"),
+        description=str(manifest.get("description") or manifest.get("notes") or "No release description."),
+        download_url=str(download_url),
+        asset_name=wanted,
+    )
 
 
 class UpdateWorker(QObject):
@@ -145,21 +154,42 @@ def install_after_exit(zip_path: str) -> None:
     target = _application_path()
     staging = Path(tempfile.mkdtemp(prefix="petshelf-update-"))
     if os.name == "nt":
-        script = staging / "update.cmd"
+        script = staging / "update.ps1"
         log = staging / "update.log"
+        backup = target.with_name(f"{target.name}.backup")
+        incoming = target.with_name(f"{target.name}.incoming")
+
+        def ps_quote(path: Path) -> str:
+            return str(path).replace("'", "''")
+
         script.write_text(
-            "@echo off\r\n"
-            f"set LOG=\"{log}\"\r\n"
-            "echo Pet Shelf updater started > %LOG%\r\n"
-            "timeout /t 2 /nobreak >nul\r\n"
-            f"powershell -NoProfile -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath '{archive}' -DestinationPath '{staging / 'unpacked'}' -Force\" >> %LOG% 2>&1\r\n"
-            f"if not exist \"{staging / 'unpacked' / 'PetShelf' / 'PetShelf.exe'}\" (echo Missing extracted executable >> %LOG% & exit /b 1)\r\n"
-            f"rmdir /s /q \"{target}\" >> %LOG% 2>&1\r\n"
-            f"move \"{staging / 'unpacked' / 'PetShelf'}\" \"{target}\" >> %LOG% 2>&1\r\n"
-            f"start \"\" \"{target / 'PetShelf.exe'}\" >> %LOG% 2>&1\r\n",
+            "$ErrorActionPreference = 'Stop'\r\n"
+            f"Start-Transcript -Path '{ps_quote(log)}' -Force\r\n"
+            "try {\r\n"
+            f"  Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue\r\n"
+            f"  Expand-Archive -LiteralPath '{ps_quote(archive)}' -DestinationPath '{ps_quote(staging / 'unpacked')}' -Force\r\n"
+            f"  $source = '{ps_quote(staging / 'unpacked' / 'PetShelf')}'\r\n"
+            f"  $incoming = '{ps_quote(incoming)}'\r\n"
+            f"  $target = '{ps_quote(target)}'\r\n"
+            f"  $backup = '{ps_quote(backup)}'\r\n"
+            "  if (-not (Test-Path -LiteralPath (Join-Path $source 'PetShelf.exe'))) { throw 'The extracted update has no PetShelf.exe.' }\r\n"
+            "  Remove-Item -LiteralPath $incoming -Recurse -Force -ErrorAction SilentlyContinue\r\n"
+            "  Move-Item -LiteralPath $source -Destination $incoming -Force\r\n"
+            "  Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue\r\n"
+            "  if (Test-Path -LiteralPath $target) { Move-Item -LiteralPath $target -Destination $backup -Force }\r\n"
+            "  try { Move-Item -LiteralPath $incoming -Destination $target -Force }\r\n"
+            "  catch { if (-not (Test-Path -LiteralPath $target) -and (Test-Path -LiteralPath $backup)) { Move-Item -LiteralPath $backup -Destination $target -Force }; throw }\r\n"
+            "  Start-Process -FilePath (Join-Path $target 'PetShelf.exe')\r\n"
+            "  Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue\r\n"
+            "}\r\n"
+            "catch { Write-Error $_ }\r\n"
+            "finally { Stop-Transcript }\r\n",
             encoding="utf-8",
         )
-        subprocess.Popen(["cmd.exe", "/c", str(script)], creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
         return
 
     script = staging / "update.sh"

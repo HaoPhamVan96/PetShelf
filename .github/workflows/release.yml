@@ -67,13 +67,15 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           python - <<'PY'
-          import json, os
+          import json, os, subprocess
           tag = os.environ["TAG"]
           repo = os.environ["REPOSITORY"]
           base = f"https://github.com/{repo}/releases/download/{tag}"
           manifest = {
               "version": tag.removeprefix("v"),
               "notes": f"Pet Shelf {tag}",
+              "author": subprocess.check_output(["git", "log", "-1", "--format=%an"], text=True).strip(),
+              "description": subprocess.check_output(["git", "log", "-1", "--format=%s"], text=True).strip(),
               "assets": {
                   "windows": f"{base}/PetShelf-Windows-x64.zip",
                   "macos-x64": f"{base}/PetShelf-macOS-x64.zip",
