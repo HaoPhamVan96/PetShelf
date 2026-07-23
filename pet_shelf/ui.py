@@ -977,7 +977,7 @@ class MainWindow(QMainWindow):
         reload_button.setEnabled(False)
         status.setText("Restarting Pet Shelf…")
         dialog.close()
-        QTimer.singleShot(300, QApplication.instance().quit)
+        self._quit_app()
 
     def _download_failed(
         self,
@@ -1027,6 +1027,7 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def _quit_app(self) -> None:
+        self.update_executor.shutdown(wait=False, cancel_futures=True)
         if self.tray_icon:
             self.tray_icon.hide()
         for overlay in list(self.overlays.values()):

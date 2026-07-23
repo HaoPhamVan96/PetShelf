@@ -188,6 +188,7 @@ def install_after_exit(zip_path: str) -> None:
         )
         subprocess.Popen(
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+            cwd=str(staging),
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         return
@@ -209,4 +210,4 @@ def install_after_exit(zip_path: str) -> None:
         encoding="utf-8",
     )
     script.chmod(0o700)
-    subprocess.Popen(["/bin/sh", str(script)], start_new_session=True)
+    subprocess.Popen(["/bin/sh", str(script)], cwd=str(staging), start_new_session=True)
