@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QCursor, QFont, QIcon, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from .models import ANIMATIONS, AnimationSpec, Pet, PetLoadError, add_silhouette_outline, scan_pet_root
 from .editor import SpriteEditorDialog
 from .petdex import PetDexDialog
+from .updater import UpdateInfo, UpdateWorker, install_after_exit
 
 
 def pixmap_from_pil(image) -> QPixmap:
@@ -715,6 +716,9 @@ class MainWindow(QMainWindow):
         self.loop_mode = self.settings.value("loopMode", False, type=bool)
         self.show_action_name = self.settings.value("showActionName", True, type=bool)
         self.settings_dialog: SettingsDialog | None = None
+        self.update_thread: QThread | None = None
+        self.update_worker: UpdateWorker | None = None
+        self.pending_update: UpdateInfo | None = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -736,10 +740,13 @@ class MainWindow(QMainWindow):
         self.refresh_button.clicked.connect(self.refresh)
         self.settings_button = QPushButton("⚙  Settings")
         self.settings_button.clicked.connect(self.open_settings)
+        self.update_button = QPushButton("Check for Updates")
+        self.update_button.clicked.connect(self.check_for_updates)
         header.addWidget(self.petdex_button)
         header.addWidget(self.folder_button)
         header.addWidget(self.refresh_button)
         header.addWidget(self.settings_button)
+        header.addWidget(self.update_button)
         outer.addLayout(header)
 
         self.path_label = QLabel("Choose a parent folder containing pet subfolders.")
@@ -769,6 +776,107 @@ class MainWindow(QMainWindow):
         self.tray_icon: QSystemTrayIcon | None = None
         if self.tray_available:
             self._setup_tray_icon()
+        QTimer.singleShot(1800, lambda: self.check_for_updates(silent=True))
+
+    def check_for_updates(self, silent: bool = False) -> None:
+        if not silent and self.pending_update is not None:
+            self._offer_update(self.pending_update)
+            return
+        if self.update_thread and self.update_thread.isRunning():
+            return
+        self.update_button.setEnabled(False)
+        self.update_button.setText("Checking…")
+        thread = QThread(self)
+        worker = UpdateWorker()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.check)
+        worker.checked.connect(lambda info: self._update_checked(info, silent))
+        worker.failed.connect(lambda message: self._update_failed(message, silent))
+        worker.checked.connect(lambda _info: thread.quit())
+        worker.failed.connect(lambda _message: thread.quit())
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda: self._clear_update_worker(thread))
+        self.update_thread = thread
+        self.update_worker = worker
+        thread.start()
+
+    def _clear_update_worker(self, thread: QThread) -> None:
+        if self.update_thread is thread:
+            self.update_thread = None
+            self.update_worker = None
+
+    def _update_checked(self, info: UpdateInfo | None, silent: bool) -> None:
+        self.update_button.setEnabled(True)
+        if info is None:
+            self.update_button.setText("Up to date")
+            if not silent:
+                QMessageBox.information(self, "Pet Shelf", "You are using the latest version.")
+            QTimer.singleShot(2500, lambda: self.update_button.setText("Check for Updates"))
+            return
+        self.pending_update = info
+        self.update_button.setText(f"Update {info.version}")
+        self.update_button.setObjectName("primaryButton")
+        self.update_button.style().unpolish(self.update_button)
+        self.update_button.style().polish(self.update_button)
+        self._offer_update(info)
+
+    def _update_failed(self, message: str, silent: bool) -> None:
+        self.update_button.setEnabled(True)
+        self.update_button.setText("Check for Updates")
+        if not silent:
+            QMessageBox.warning(self, "Update check failed", f"Could not check for updates.\n\n{message}")
+
+    def _offer_update(self, info: UpdateInfo) -> None:
+        notes = info.notes.strip() or "A newer version of Pet Shelf is available."
+        answer = QMessageBox.question(
+            self,
+            f"Pet Shelf {info.version} is available",
+            f"{notes}\n\nDownload and install it now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._download_update(info)
+
+    def _download_update(self, info: UpdateInfo) -> None:
+        if self.update_thread and self.update_thread.isRunning():
+            return
+        progress = QMessageBox(self)
+        progress.setWindowTitle("Updating Pet Shelf")
+        progress.setText(f"Downloading {info.asset_name}…")
+        progress.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        progress.show()
+        thread = QThread(self)
+        worker = UpdateWorker()
+        worker.moveToThread(thread)
+        thread.started.connect(lambda: worker.download(info))
+        worker.progress.connect(lambda value: progress.setInformativeText(f"Downloaded {value}%"))
+        worker.downloaded.connect(lambda path: self._install_download(path, progress, thread))
+        worker.failed.connect(lambda message: self._download_failed(message, progress, thread))
+        self.update_thread = thread
+        self.update_worker = worker
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda: self._clear_update_worker(thread))
+        thread.start()
+
+    def _install_download(self, path: str, progress: QMessageBox, thread: QThread) -> None:
+        try:
+            install_after_exit(path)
+        except Exception as exc:
+            progress.close()
+            thread.quit()
+            QMessageBox.warning(self, "Update failed", str(exc))
+            return
+        self.pending_update = None
+        progress.setText("Update downloaded. Pet Shelf will restart now…")
+        QTimer.singleShot(500, QApplication.instance().quit)
+        thread.quit()
+
+    def _download_failed(self, message: str, progress: QMessageBox, thread: QThread) -> None:
+        progress.close()
+        thread.quit()
+        QMessageBox.warning(self, "Download failed", message)
 
     def _setup_tray_icon(self) -> None:
         icon = tray_icon_pixmap()

@@ -1,0 +1,88 @@
+name: Build and publish PetShelf
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build Windows package
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --name PetShelf --icon assets\petshelf.ico --add-data "assets;assets" --collect-all PIL run_pet_shelf.py
+          Compress-Archive -Path dist\PetShelf -DestinationPath PetShelf-Windows-x64.zip -CompressionLevel Optimal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PetShelf-Windows-x64
+          path: PetShelf-Windows-x64.zip
+
+  macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-13
+            suffix: x64
+          - runner: macos-14
+            suffix: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build macOS app
+        run: bash scripts/build_macos.sh
+      - name: Package macOS app
+        run: ditto -c -k --sequesterRsrc --keepParent dist/PetShelf.app PetShelf-macOS-${{ matrix.suffix }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PetShelf-macOS-${{ matrix.suffix }}
+          path: PetShelf-macOS-${{ matrix.suffix }}.zip
+
+  release:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create latest release manifest
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json, os
+          tag = os.environ["TAG"]
+          repo = os.environ["REPOSITORY"]
+          base = f"https://github.com/{repo}/releases/download/{tag}"
+          manifest = {
+              "version": tag.removeprefix("v"),
+              "notes": f"Pet Shelf {tag}",
+              "assets": {
+                  "windows": f"{base}/PetShelf-Windows-x64.zip",
+                  "macos-x64": f"{base}/PetShelf-macOS-x64.zip",
+                  "macos-arm64": f"{base}/PetShelf-macOS-arm64.zip",
+              },
+          }
+          with open("release-assets/latest.json", "w", encoding="utf-8") as handle:
+              json.dump(manifest, handle, indent=2)
+          PY
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" release-assets/* --title "Pet Shelf ${{ github.ref_name }}" --generate-notes
