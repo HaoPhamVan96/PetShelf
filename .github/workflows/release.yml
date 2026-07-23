@@ -31,9 +31,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: macos-13
+          - runner: macos-15-intel
             suffix: x64
-          - runner: macos-14
+          - runner: macos-15
             suffix: arm64
     runs-on: ${{ matrix.runner }}
     steps:

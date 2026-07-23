@@ -16,7 +16,7 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 
-GitHub Actions trong `.github/workflows/release.yml` sẽ tự động build Windows x64, macOS Intel và macOS Apple Silicon, rồi tạo GitHub Release.
+GitHub Actions trong `.github/workflows/release.yml` sẽ tự động build Windows x64, macOS Intel (`macos-15-intel`) và macOS Apple Silicon (`macos-15`), rồi tạo GitHub Release.
 
 ## Cách app cập nhật
 
