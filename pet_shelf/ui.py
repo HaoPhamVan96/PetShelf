@@ -46,6 +46,7 @@ def pixmap_from_pil(image) -> QPixmap:
 
 
 def tray_icon_pixmap(size: int = 64) -> QIcon:
+    """Create the shared Pet Shelf paw icon for the window and system tray."""
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
