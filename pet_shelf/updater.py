@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -152,6 +153,15 @@ def install_after_exit(zip_path: str) -> None:
     archive = Path(zip_path).resolve()
     validate_update_archive(str(archive))
     target = _application_path()
+    if sys.platform == "darwin":
+        try:
+            probe_fd, probe_name = tempfile.mkstemp(prefix=".petshelf-update-check-", dir=target.parent)
+            os.close(probe_fd)
+            Path(probe_name).unlink()
+        except OSError as exc:
+            raise RuntimeError(
+                f"Pet Shelf cannot update {target}. Move it to ~/Applications or grant write permission to /Applications. ({exc})"
+            ) from exc
     staging = Path(tempfile.mkdtemp(prefix="petshelf-update-"))
     if os.name == "nt":
         script = staging / "update.ps1"
@@ -196,17 +206,30 @@ def install_after_exit(zip_path: str) -> None:
     script = staging / "update.sh"
     extracted = staging / "unpacked"
     log = staging / "update.log"
+    incoming = target.with_name(f"{target.name}.incoming")
+    backup = target.with_name(f"{target.name}.backup")
     script.write_text(
         "#!/bin/sh\n"
-        f"exec >> '{log}' 2>&1\n"
+        "set -eu\n"
+        f"exec >> {shlex.quote(str(log))} 2>&1\n"
         "echo 'Pet Shelf updater started'\n"
-        "sleep 2\n"
-        f"ditto -x -k '{archive}' '{extracted}'\n"
-        f"test -x '{extracted / 'PetShelf.app' / 'Contents' / 'MacOS' / 'PetShelf'}'\n"
-        f"rm -rf '{target}'\n"
-        f"mv '{extracted / 'PetShelf.app'}' '{target}'\n"
-        f"open '{target}'\n"
-        f"rm -rf '{staging}'\n",
+        f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.2; done\n"
+        f"ditto -x -k {shlex.quote(str(archive))} {shlex.quote(str(extracted))}\n"
+        f"source={shlex.quote(str(extracted / 'PetShelf.app'))}\n"
+        f"target={shlex.quote(str(target))}\n"
+        f"incoming={shlex.quote(str(incoming))}\n"
+        f"backup={shlex.quote(str(backup))}\n"
+        "test -x \"$source/Contents/MacOS/PetShelf\"\n"
+        "rm -rf \"$incoming\" \"$backup\"\n"
+        "mv \"$source\" \"$incoming\"\n"
+        "if [ -d \"$target\" ]; then mv \"$target\" \"$backup\"; fi\n"
+        "if ! mv \"$incoming\" \"$target\"; then\n"
+        "  if [ ! -d \"$target\" ] && [ -d \"$backup\" ]; then mv \"$backup\" \"$target\"; fi\n"
+        "  exit 1\n"
+        "fi\n"
+        "open -n \"$target\"\n"
+        "rm -rf \"$backup\"\n"
+        "echo 'Pet Shelf updater completed'\n",
         encoding="utf-8",
     )
     script.chmod(0o700)
