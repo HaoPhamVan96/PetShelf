@@ -825,7 +825,8 @@ class MainWindow(QMainWindow):
         self.update_button.setEnabled(True)
         self.update_button.setText("Check for Updates")
         if not silent:
-            QMessageBox.warning(self, "Update check failed", f"Could not check for updates.\n\n{message}")
+            details = message or "No error details were returned. Check your internet connection and GitHub Release."
+            QMessageBox.warning(self, "Update check failed", f"Could not check for updates.\n\n{details}")
 
     def _offer_update(self, info: UpdateInfo) -> None:
         notes = info.notes.strip() or "A newer version of Pet Shelf is available."

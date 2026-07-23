@@ -19,7 +19,7 @@ from . import __version__
 
 CURRENT_VERSION = __version__
 GITHUB_REPOSITORY = "HaoPhamVan96/PetShelf"
-RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
+LATEST_MANIFEST = f"https://github.com/{GITHUB_REPOSITORY}/releases/latest/download/latest.json"
 
 
 def version_tuple(value: str) -> tuple[int, ...]:
@@ -51,19 +51,21 @@ def _asset_name() -> str:
 def check_latest_release() -> UpdateInfo | None:
     """Return an update for this platform, or None when already current."""
     request = urllib.request.Request(
-        os.environ.get("PETSHELF_RELEASES_API", RELEASES_API),
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "PetShelf-Updater"},
+        os.environ.get("PETSHELF_UPDATE_URL", LATEST_MANIFEST),
+        headers={"Accept": "application/json", "User-Agent": "PetShelf-Updater"},
     )
     with urllib.request.urlopen(request, timeout=8) as response:
-        release = json.load(response)
-    version = str(release.get("tag_name", "")).lstrip("vV")
+        manifest = json.load(response)
+    version = str(manifest.get("version", "")).lstrip("vV")
     if not version or version_tuple(version) <= version_tuple(CURRENT_VERSION):
         return None
     wanted = _asset_name()
-    asset = next((item for item in release.get("assets", []) if item.get("name") == wanted), None)
-    if not asset or not asset.get("browser_download_url"):
+    download_url = manifest.get("assets", {}).get(
+        "windows" if os.name == "nt" else f"macos-{'arm64' if platform.machine().lower() in {'arm64', 'aarch64'} else 'x64'}"
+    )
+    if not download_url:
         raise RuntimeError(f"Release {version} does not contain {wanted}")
-    return UpdateInfo(version, str(release.get("body") or ""), str(asset["browser_download_url"]), wanted)
+    return UpdateInfo(version, str(manifest.get("notes") or ""), str(download_url), wanted)
 
 
 class UpdateWorker(QObject):
@@ -76,7 +78,7 @@ class UpdateWorker(QObject):
         try:
             self.checked.emit(check_latest_release())
         except Exception as exc:  # network errors must never crash the app
-            self.failed.emit(str(exc))
+            self.failed.emit(f"{type(exc).__name__}: {exc}".strip())
 
     def download(self, info: UpdateInfo) -> None:
         try:
@@ -92,7 +94,7 @@ class UpdateWorker(QObject):
                         self.progress.emit(min(100, round(received * 100 / total)))
             self.downloaded.emit(str(destination))
         except Exception as exc:
-            self.failed.emit(str(exc))
+            self.failed.emit(f"{type(exc).__name__}: {exc}".strip())
 
 
 def _application_path() -> Path:
