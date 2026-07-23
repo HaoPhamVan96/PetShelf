@@ -10,5 +10,6 @@ if (-not (Test-Path $Python)) {
     --hidden-import pet_shelf.models `
     --hidden-import pet_shelf.editor `
     --hidden-import pet_shelf.petdex `
+    --hidden-import pet_shelf.updater `
     run_pet_shelf.py
 Write-Host "Built: dist/PetShelf/PetShelf.exe"

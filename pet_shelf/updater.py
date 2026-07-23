@@ -106,23 +106,42 @@ def _application_path() -> Path:
     return executable.parent
 
 
+def validate_update_archive(zip_path: str) -> None:
+    """Reject incomplete or unexpected update archives before closing the app."""
+    archive = Path(zip_path)
+    if not archive.is_file() or archive.stat().st_size < 1024:
+        raise RuntimeError("The downloaded update is missing or incomplete.")
+    with zipfile.ZipFile(archive) as package:
+        names = set(package.namelist())
+        if os.name == "nt":
+            required = "PetShelf/PetShelf.exe"
+        else:
+            required = "PetShelf.app/Contents/MacOS/PetShelf"
+        if required not in names:
+            raise RuntimeError(f"The update archive is invalid: missing {required}.")
+
+
 def install_after_exit(zip_path: str) -> None:
     """Start a detached helper that replaces the app after this process exits."""
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Updates can only install packaged applications")
     archive = Path(zip_path).resolve()
+    validate_update_archive(str(archive))
     target = _application_path()
     staging = Path(tempfile.mkdtemp(prefix="petshelf-update-"))
     if os.name == "nt":
         script = staging / "update.cmd"
+        log = staging / "update.log"
         script.write_text(
             "@echo off\r\n"
+            f"set LOG=\"{log}\"\r\n"
+            "echo Pet Shelf updater started > %LOG%\r\n"
             "timeout /t 2 /nobreak >nul\r\n"
-            f"powershell -NoProfile -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath '{archive}' -DestinationPath '{staging / 'unpacked'}' -Force\"\r\n"
-            f"rmdir /s /q \"{target}\"\r\n"
-            f"move \"{staging / 'unpacked' / 'PetShelf'}\" \"{target}\"\r\n"
-            f"start \"\" \"{target / 'PetShelf.exe'}\"\r\n"
-            f"rmdir /s /q \"{staging}\"\r\n",
+            f"powershell -NoProfile -ExecutionPolicy Bypass -Command \"Expand-Archive -LiteralPath '{archive}' -DestinationPath '{staging / 'unpacked'}' -Force\" >> %LOG% 2>&1\r\n"
+            f"if not exist \"{staging / 'unpacked' / 'PetShelf' / 'PetShelf.exe'}\" (echo Missing extracted executable >> %LOG% & exit /b 1)\r\n"
+            f"rmdir /s /q \"{target}\" >> %LOG% 2>&1\r\n"
+            f"move \"{staging / 'unpacked' / 'PetShelf'}\" \"{target}\" >> %LOG% 2>&1\r\n"
+            f"start \"\" \"{target / 'PetShelf.exe'}\" >> %LOG% 2>&1\r\n",
             encoding="utf-8",
         )
         subprocess.Popen(["cmd.exe", "/c", str(script)], creationflags=subprocess.CREATE_NO_WINDOW)
@@ -130,10 +149,14 @@ def install_after_exit(zip_path: str) -> None:
 
     script = staging / "update.sh"
     extracted = staging / "unpacked"
+    log = staging / "update.log"
     script.write_text(
         "#!/bin/sh\n"
+        f"exec >> '{log}' 2>&1\n"
+        "echo 'Pet Shelf updater started'\n"
         "sleep 2\n"
         f"ditto -x -k '{archive}' '{extracted}'\n"
+        f"test -x '{extracted / 'PetShelf.app' / 'Contents' / 'MacOS' / 'PetShelf'}'\n"
         f"rm -rf '{target}'\n"
         f"mv '{extracted / 'PetShelf.app'}' '{target}'\n"
         f"open '{target}'\n"

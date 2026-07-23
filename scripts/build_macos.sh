@@ -12,5 +12,6 @@ fi
     --hidden-import pet_shelf.models \
     --hidden-import pet_shelf.editor \
     --hidden-import pet_shelf.petdex \
+    --hidden-import pet_shelf.updater \
     run_pet_shelf.py
 echo "Built: dist/PetShelf.app"

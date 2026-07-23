@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -719,6 +720,8 @@ class MainWindow(QMainWindow):
         self.update_thread: QThread | None = None
         self.update_worker: UpdateWorker | None = None
         self.pending_update: UpdateInfo | None = None
+        self.downloaded_update_path: str | None = None
+        self.update_dialog: QDialog | None = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -790,8 +793,14 @@ class MainWindow(QMainWindow):
         worker = UpdateWorker()
         worker.moveToThread(thread)
         thread.started.connect(worker.check)
-        worker.checked.connect(lambda info: self._update_checked(info, silent))
-        worker.failed.connect(lambda message: self._update_failed(message, silent))
+        worker.checked.connect(
+            lambda info: self._update_checked(info, silent),
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.failed.connect(
+            lambda message: self._update_failed(message, silent),
+            Qt.ConnectionType.QueuedConnection,
+        )
         worker.checked.connect(lambda _info: thread.quit())
         worker.failed.connect(lambda _message: thread.quit())
         thread.finished.connect(worker.deleteLater)
@@ -829,31 +838,89 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Update check failed", f"Could not check for updates.\n\n{details}")
 
     def _offer_update(self, info: UpdateInfo) -> None:
-        notes = info.notes.strip() or "A newer version of Pet Shelf is available."
-        answer = QMessageBox.question(
-            self,
-            f"Pet Shelf {info.version} is available",
-            f"{notes}\n\nDownload and install it now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        if self.update_dialog:
+            self.update_dialog.raise_()
+            self.update_dialog.activateWindow()
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Pet Shelf {info.version} is available")
+        dialog.setMinimumWidth(440)
+        layout = QVBoxLayout(dialog)
+        title = QLabel(f"A new Pet Shelf version ({info.version}) is available.")
+        title.setStyleSheet("font-size: 17px; font-weight: 600;")
+        layout.addWidget(title)
+        notes = QLabel(info.notes.strip() or "Download the latest version to get new features and fixes.")
+        notes.setWordWrap(True)
+        layout.addWidget(notes)
+        status = QLabel("Ready to download.")
+        layout.addWidget(status)
+        progress = QProgressBar()
+        progress.setRange(0, 100)
+        progress.setValue(0)
+        progress.hide()
+        layout.addWidget(progress)
+        buttons = QHBoxLayout()
+        download_button = QPushButton("Update now")
+        later_button = QPushButton("Later")
+        reload_button = QPushButton("Reload Pet Shelf")
+        reload_button.setObjectName("primaryButton")
+        reload_button.hide()
+        buttons.addStretch()
+        buttons.addWidget(later_button)
+        buttons.addWidget(download_button)
+        buttons.addWidget(reload_button)
+        layout.addLayout(buttons)
+        self.update_dialog = dialog
+        dialog.finished.connect(lambda: setattr(self, "update_dialog", None))
+        later_button.clicked.connect(dialog.close)
+        download_button.clicked.connect(
+            lambda: self._download_update(
+                info, dialog, status, progress, download_button, later_button, reload_button
+            )
         )
-        if answer == QMessageBox.StandardButton.Yes:
-            self._download_update(info)
+        reload_button.clicked.connect(
+            lambda: self._reload_after_update(info, dialog, status, reload_button)
+        )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
-    def _download_update(self, info: UpdateInfo) -> None:
+    def _download_update(
+        self,
+        info: UpdateInfo,
+        dialog: QDialog,
+        status: QLabel,
+        progress: QProgressBar,
+        download_button: QPushButton,
+        later_button: QPushButton,
+        reload_button: QPushButton,
+    ) -> None:
         if self.update_thread and self.update_thread.isRunning():
             return
-        progress = QMessageBox(self)
-        progress.setWindowTitle("Updating Pet Shelf")
-        progress.setText(f"Downloading {info.asset_name}…")
-        progress.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        download_button.setEnabled(False)
+        later_button.setEnabled(False)
         progress.show()
+        status.setText(f"Downloading {info.asset_name}…")
         thread = QThread(self)
         worker = UpdateWorker()
         worker.moveToThread(thread)
         thread.started.connect(lambda: worker.download(info))
-        worker.progress.connect(lambda value: progress.setInformativeText(f"Downloaded {value}%"))
-        worker.downloaded.connect(lambda path: self._install_download(path, progress, thread))
-        worker.failed.connect(lambda message: self._download_failed(message, progress, thread))
+        worker.progress.connect(
+            lambda value: (progress.setValue(value), status.setText(f"Downloading… {value}%")),
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.downloaded.connect(
+            lambda path: self._download_ready(
+                path, status, progress, download_button, later_button, reload_button, thread
+            ),
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.failed.connect(
+            lambda message: self._download_failed(
+                message, status, progress, download_button, later_button, thread
+            ),
+            Qt.ConnectionType.QueuedConnection,
+        )
         self.update_thread = thread
         self.update_worker = worker
         thread.finished.connect(worker.deleteLater)
@@ -861,23 +928,75 @@ class MainWindow(QMainWindow):
         thread.finished.connect(lambda: self._clear_update_worker(thread))
         thread.start()
 
-    def _install_download(self, path: str, progress: QMessageBox, thread: QThread) -> None:
+    def _download_ready(
+        self,
+        path: str,
+        status: QLabel,
+        progress: QProgressBar,
+        download_button: QPushButton,
+        later_button: QPushButton,
+        reload_button: QPushButton,
+        thread: QThread,
+    ) -> None:
         try:
-            install_after_exit(path)
+            from .updater import validate_update_archive
+
+            validate_update_archive(path)
         except Exception as exc:
-            progress.close()
+            status.setText(f"Download failed: {exc}")
+            progress.hide()
+            download_button.setText("Retry download")
+            download_button.setEnabled(True)
+            later_button.setEnabled(True)
             thread.quit()
-            QMessageBox.warning(self, "Update failed", str(exc))
             return
+        self.downloaded_update_path = path
         self.pending_update = None
-        progress.setText("Update downloaded. Pet Shelf will restart now…")
-        QTimer.singleShot(500, QApplication.instance().quit)
+        status.setText("Download complete. Click Reload Pet Shelf to apply it.")
+        progress.setValue(100)
+        download_button.hide()
+        later_button.setEnabled(True)
+        reload_button.show()
         thread.quit()
 
-    def _download_failed(self, message: str, progress: QMessageBox, thread: QThread) -> None:
-        progress.close()
+    def _reload_after_update(
+        self,
+        info: UpdateInfo,
+        dialog: QDialog,
+        status: QLabel,
+        reload_button: QPushButton,
+    ) -> None:
+        archive = self.downloaded_update_path
+        if not archive:
+            status.setText("The update file is no longer available. Please download again.")
+            reload_button.setEnabled(False)
+            return
+        try:
+            install_after_exit(archive)
+        except Exception as exc:
+            status.setText(f"Could not apply update: {exc}")
+            reload_button.setEnabled(True)
+            return
+        reload_button.setEnabled(False)
+        status.setText("Restarting Pet Shelf…")
+        dialog.close()
+        QTimer.singleShot(300, QApplication.instance().quit)
+
+    def _download_failed(
+        self,
+        message: str,
+        status: QLabel,
+        progress: QProgressBar,
+        download_button: QPushButton,
+        later_button: QPushButton,
+        thread: QThread,
+    ) -> None:
+        status.setText(message or "Download failed. Please try again.")
+        progress.hide()
+        download_button.setText("Retry download")
+        download_button.setEnabled(True)
+        later_button.setEnabled(True)
         thread.quit()
-        QMessageBox.warning(self, "Download failed", message)
 
     def _setup_tray_icon(self) -> None:
         icon = tray_icon_pixmap()
