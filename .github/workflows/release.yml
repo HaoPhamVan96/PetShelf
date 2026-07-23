@@ -56,6 +56,7 @@ jobs:
     needs: [windows, macos]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
@@ -85,4 +86,4 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" release-assets/* --title "Pet Shelf ${{ github.ref_name }}" --generate-notes
+        run: gh release create "${{ github.ref_name }}" release-assets/* --repo "${{ github.repository }}" --title "Pet Shelf ${{ github.ref_name }}" --generate-notes
